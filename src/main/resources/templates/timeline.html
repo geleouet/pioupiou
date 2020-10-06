@@ -1,0 +1,278 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="none" th:content="${csrf_token}">
+
+    <title>PiouPiou</title>
+    <link href="/bootstrap.min.css" rel="stylesheet" />
+    <script src="/jquery-3.4.1.min.js"></script>
+    <script src="/bootstrap.min.js"></script>
+
+    <style type="text/css">
+        body {
+            font-family: 'Varela Round', sans-serif;
+        }
+
+        @media (min-width: 1200px) {
+
+            .container {
+                max-width: 800px;
+            }
+        }
+
+        .modal-login {
+            color: #636363;
+            width: 350px;
+        }
+
+        .modal-login .modal-content {
+            padding: 20px;
+            border-radius: 5px;
+            border: none;
+
+            background-color: #ccddff;
+        }
+
+        .modal-login .modal-header {
+            border-bottom: none;
+            position: relative;
+            justify-content: center;
+        }
+
+        .modal-login h4 {
+            text-align: center;
+            font-size: 26px;
+            margin: 30px 0 -15px;
+        }
+
+        .modal-login .form-control:focus {
+            border-color: #7065c0;
+        }
+
+        .modal-login .form-control,
+        .modal-login .btn {
+            min-height: 40px;
+            border-radius: 3px;
+        }
+
+        .modal-login .close {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+        }
+
+        .modal-login .modal-footer {
+            background: #ddeeff;
+            border-color: #dee4e7;
+            text-align: center;
+            justify-content: center;
+            margin: 0 -20px -20px;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+
+        .modal-login .modal-footer a {
+            color: #999;
+        }
+
+        .modal-login .avatar {
+            position: absolute;
+            margin: 0 auto;
+            left: 0;
+            right: 0;
+            top: -70px;
+            width: 95px;
+            height: 95px;
+            border-radius: 50%;
+            z-index: 9;
+            background: #ffffff;
+            padding: 15px;
+            box-shadow: 0px 2px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal-login .avatar img {
+            width: 100%;
+        }
+
+        .modal-login.modal-dialog {
+            margin-top: 80px;
+        }
+
+        .modal-login .btn {
+            color: #fff;
+            border-radius: 4px;
+            background: #f08781;
+            text-decoration: none;
+            transition: all 0.4s;
+            line-height: normal;
+            border: none;
+        }
+
+        .modal-login .btn:hover,
+        .modal-login .btn:focus {
+            background: #f5aba6;
+            outline: none;
+        }
+
+        .trigger-btn {
+            display: inline-block;
+            margin: 100px auto;
+        }
+
+        .msgtxt {
+            padding-left: 1em;
+        }
+
+        .msgbox {
+            border: solid 2px #ddeeff;
+            margin: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 3px 3px 5px lightgrey;
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav class="navbar navbar-light bg-light">
+        <a class="navbar-brand" href="#">
+            <img src="monTwitt2.png" width="32px" /><span th:text="${name}"></span>
+        </a>
+
+        <div class="form-inline my-2 my-lg-0">
+            <span id="global_login"></span>
+        </div>
+        <div>
+            <div style="display: inline-block;">
+                <form id="searchFriend">
+                    <input type="text" placeholder="Ajouter mes amis..." id="friendinput" />
+                    <input type="submit" value="Chercher.." />
+                </form>
+            </div>
+            <div style="display: inline-block;">
+                <a class="nav-link dropdown-toggle d-none d-sm-block" style="color: #666; padding: 0px;" href="#"
+                    id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <button class="navbar-toggler" type="button" data-toggle="collapse"
+                        data-target="#navbarToggleExternalContent" aria-controls="navbarToggleExternalContent"
+                        aria-expanded="false" aria-label="Toggle navigation">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown"
+                    style="right:10px;box-shadow: 3px 3px 3px gray;">
+                    <div class="dropdown-divider"></div>
+                    <a class="dropdown-item" href="/logout"><img src="contribute.png" width="16px"
+                            height="16px">Déconnection</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+
+    <p></p>
+
+    <div class="container">
+        <div class='msgbox' style="margin-bottom:0px; padding-bottom:0px">
+            <form action="/message" method="post">
+                <input type="text" name="message" placeholder="Nouveau message" style="width:100%;" />
+                <input type="hidden" value="" name="csrf" th:value="${csrf_token}"></input>
+                <div class="form-group" style="text-align: right; margin-top:0.5em;">
+                    <input type="submit" value="Envoyer" />
+                </div>
+            </form>
+        </div>
+        <div class="tab-content" id="resultat">
+        </div>
+
+    </div>
+
+
+    <!-- Modal HTML -->
+    <div id="myModal" class="modal fade">
+        <div class="modal-dialog modal-login">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="avatar">
+                        <img src="/monTwitt.png" alt="Avatar">
+                    </div>
+                    <h4 class="modal-title">PiouPiou</h4>
+                    <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="listff">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+        function follow(id) {
+            $('#bb' + id).hide(100)
+            $.ajax({ type: "POST", url: "/follow/" + id });            
+        }
+
+        $('#searchFriend').submit(e => {
+            e.preventDefault();
+            $.ajax({
+                type: "GET",
+                url: "/autocomplete/" + $('#friendinput').val(),
+                success: function (autocomplete) {
+                    let html = "";
+                    for (let au of autocomplete) {
+                        html += "<div id ='bb" + au.id + "'><button onclick='follow(" + au.id + ")' style='margin-bottom:1em; width: 100%; border-radius: 5px; border: solid 1px lightgray; box-shadow: 2px 2px 5px grey;'>"
+                            + au.name + "</button></div>";
+                    }
+                    $('#listff').html(html);
+                    $('#myModal').modal('show', {
+                        keyboard: false,
+                        backdrop: 'static'
+                    })
+                }
+            });
+        });
+
+
+        $.ajax({
+            type: "GET",
+            url: "/timeline",
+            success: function (timeline) {
+                $('#resultat').html('');
+
+                let html = "";
+                for (let msg of timeline.messages) {
+                    html += "<div class='msgbox'>" +
+                        "<span><b>" + msg.name + " </b> <i> " + msg.time + "</i></span>" +
+                        "<p class='msgtxt'>" + msg.message + "</p>" +
+                        "</div>";
+                }
+                $('#resultat').html(html);
+            }
+        }
+        );
+
+        var csrf_token = $('meta[name="csrf-token"]').attr('content');
+
+        function csrfSafeMethod(method) {
+            // these HTTP methods do not require CSRF protection
+            return (/^(GET|HEAD|OPTIONS)$/.test(method));
+        }
+
+        $.ajaxSetup({
+            beforeSend: function (xhr, settings) {
+                if (!csrfSafeMethod(settings.type) && !this.crossDomain) {
+                    xhr.setRequestHeader("anti-csrf-token", csrf_token);
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

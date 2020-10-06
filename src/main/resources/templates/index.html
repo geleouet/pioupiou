@@ -130,11 +130,11 @@
         </div>
     </nav>
 -->
-    
+
     <p></p>
 
     <div class="container-fluid">
-        
+
         <div class="tab-content" id="resultat">
         </div>
 
@@ -171,6 +171,7 @@
                         <div class="form-group" style="text-align: center;">
                             <input id="sub_id" type="submit" value="Connection"></input>
                         </div>
+                        <input type="hidden" value="" name="csrf" th:value="${csrf_token}"></input>
                         <!--
                 -->
                     </form>
@@ -187,7 +188,7 @@
 
     <script>
 
-        function inscription() {            
+        function inscription() {
             $("#sub_id").attr("value", "M'inscrire")
             $("#switch_id").html("Connection")
             $("#switch_id").attr("onclick", "connection()")
