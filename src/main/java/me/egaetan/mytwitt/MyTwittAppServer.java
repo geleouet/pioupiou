@@ -50,7 +50,8 @@ public class MyTwittAppServer {
 	}
 
 	public static class RegisterRequest {
-		public String name;
+		public String username;
+		public String pseudo;
 		public String password;
 	}
 
@@ -107,10 +108,10 @@ public class MyTwittAppServer {
 
 	
 	
-	public static Author save(RegisterRequest author, Jdbi jdbi) {
+	public static Author register(RegisterRequest author, Jdbi jdbi) {
 
 		String salt = new SecureRandomString().generate();
-
+		
 		return jdbi.withHandle(h->
 		h.inTransaction(handle -> {
 			int cost = 6;
@@ -124,7 +125,7 @@ public class MyTwittAppServer {
 
 					.createUpdate("INSERT INTO Login(username, password, salt) VALUES"
 							+ " (:name, :password, :salt)")
-					.bind("name", author.name)
+					.bind("name", author.username)
 					.bind("password", pwd)
 					.bind("salt", salt)
 					.executeAndReturnGeneratedKeys("id")
@@ -138,7 +139,7 @@ public class MyTwittAppServer {
 					.createUpdate("INSERT INTO Author(id, name) VALUES"
 							+ " (:id, :name)")
 					.bind("id", id)
-					.bind("name", author.name)
+					.bind("name", author.pseudo)
 					.executeAndReturnGeneratedKeys("id")
 					.mapTo(Author.class)
 					.one();
@@ -276,8 +277,11 @@ public class MyTwittAppServer {
 		});
 		
 		app.post("/register", ctx -> {
-			RegisterRequest register = ctx.bodyAsClass(RegisterRequest.class);
-			save(register, jdbi);
+			RegisterRequest request = new RegisterRequest();
+			request.username = ctx.formParam("username");
+			request.password = ctx.formParam("password");
+			request.pseudo = ctx.formParam("pseudo");
+			register(request, jdbi);
 		});
 		app.post("/login", ctx -> {
 			String name = ctx.formParam("username");
@@ -344,6 +348,17 @@ public class MyTwittAppServer {
 		private static final Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
 
 		public String generate() {
+			while (true) {
+				String res = generateBytes();
+				try {
+					Base64.getDecoder().decode(res.getBytes());
+					return res;
+				} catch (IllegalArgumentException e) {
+				}
+			}
+
+		}
+		public String generateBytes() {
 			byte[] buffer = new byte[16];
 			random.nextBytes(buffer);
 			return encoder.encodeToString(buffer);
