@@ -6,10 +6,16 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+import javax.servlet.http.Cookie;
 
 import org.bouncycastle.crypto.generators.BCrypt;
+import org.eclipse.jetty.http.HttpCookie;
 import org.eclipse.jetty.http.HttpStatus;
 import org.h2.tools.Server;
 import org.jdbi.v3.core.Jdbi;
@@ -18,6 +24,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.javalin.Javalin;
+import io.javalin.http.Context;
+import io.javalin.plugin.rendering.template.TemplateUtil;
 
 public class MyTwittAppServer {
 
@@ -108,9 +116,9 @@ public class MyTwittAppServer {
 
 	
 	
-	public static Author register(RegisterRequest author, Jdbi jdbi) {
+	public static Author register(RegisterRequest author, SecureRandomString secureRandomString, Jdbi jdbi) {
 
-		String salt = new SecureRandomString().generate();
+		String salt = secureRandomString.generate();
 		
 		return jdbi.withHandle(h->
 		h.inTransaction(handle -> {
@@ -121,6 +129,7 @@ public class MyTwittAppServer {
 			String pwd = Base64.getEncoder().encodeToString(generate);
 			;
 			
+			@SuppressWarnings("resource") // Why !?
 			int id = handle.registerRowMapper(FieldMapper.factory(Login.class))
 
 					.createUpdate("INSERT INTO Login(username, password, salt) VALUES"
@@ -192,16 +201,35 @@ public class MyTwittAppServer {
 		
 	}
 	
+	public static List<Author> autocomplete(Jdbi jdbi, String motif) {
+		if (motif.length() < 3) {
+			return Collections.emptyList();
+		}
+		return jdbi.withHandle(handle -> 
+		handle.registerRowMapper(FieldMapper.factory(Author.class))
+		.createQuery("SELECT TOP 10 id, name FROM Author WHERE name LIKE :motif || '%'")
+		.bind("motif", motif)
+		.mapTo(Author.class)
+		.list()
+				);
+	}
+	
 
 	public static List<TimeMessage> timeline(int id, Jdbi jdbi) {
 		return jdbi.withHandle(handle -> 
 		handle.registerRowMapper(FieldMapper.factory(TimeMessage.class))
-		.createQuery(
-				"select top 100 author.name, message.message, message.time from message" + 
-				" inner join author on author.id = message.idauthor" + 
-				" inner join follow on follow.idauthor = author.id" + 
-				" where follow.idfollower = :id" + 
-				" order by time desc")
+		.createQuery(	
+				"with merged as ( " + 
+				" select top 100 author.name, message.message, message.time from message " + 
+				" inner join author on author.id = message.idauthor  " + 
+				" inner join follow on follow.idauthor = author.id  " + 
+				" where follow.idfollower = :id " + 
+				" union " + 
+				" select top 100 author.name, message.message, message.time from message " + 
+				" inner join author on author.id = message.idauthor  " + 
+				" where author.id = :id " + 
+				" order by time desc " + 
+				") select top 100  merged.name, merged.message, merged.time from merged order by time desc")
 		.bind("id", id)
 		.mapTo(TimeMessage.class)
 		.list()
@@ -217,7 +245,6 @@ public class MyTwittAppServer {
 		.bind("idFollower", follow.idFollower)
 		.execute());
 	}
-	
 	
 	public static void init(String url) {
 		try {
@@ -259,6 +286,100 @@ public class MyTwittAppServer {
 		}
 	}
 	
+	public static class Session {
+		public Author author;
+		private String id;
+		private String csrf;
+
+		public Session(String id, Author author) {
+			super();
+			this.id = id;
+			this.author = author;
+		}
+
+		public boolean invalid() {
+			return author == null;
+		}
+
+		public boolean verifyCsrf(String csrf) {
+			if (this.csrf == null) {
+				return false;
+			}
+			return this.csrf.equals(csrf);
+		}
+		
+	}
+	
+	public static class InMemorySessionStore {
+		ConcurrentMap<String, Session> sessions = new ConcurrentHashMap<>();
+		
+		public void add(Session session) {
+			sessions.put(session.id, session);
+		}
+		
+		public Optional<Session> retrieve(String id) {
+			return Optional.ofNullable(sessions.get(id));
+		}
+	}
+	
+	public static class Cookies {
+		
+		private final boolean isHttps;
+
+		public Cookies(boolean isHttps) {
+			super();
+			this.isHttps = isHttps;
+		}
+
+		public void registerSession(Context ctx, String sessionId) {
+			Cookie cookieSession = new Cookie("id", sessionId);
+			cookieSession.setHttpOnly(true);
+			cookieSession.setSecure(isHttps);
+			cookieSession.setComment(HttpCookie.SAME_SITE_STRICT_COMMENT);
+			ctx.cookie(cookieSession);
+		}
+	}
+	
+	public static class CsrfException extends RuntimeException {
+
+		private static final long serialVersionUID = 5255026398994226667L;
+	}
+	public static class InvalidSessionException extends RuntimeException {
+		
+		private static final long serialVersionUID = 5255026398994226667L;
+	}
+	
+	public static void checkCsrf(Context ctx, InMemorySessionStore sessionStore) {
+		Optional<Session> session = sessionStore.retrieve(ctx.cookie("id"));
+		if (session.isEmpty()) {
+			throw new CsrfException();
+		}
+		checkCsrf(ctx, session.get());
+	}
+	
+	public static void checkCsrf(Context ctx, Session session) {
+		String csrf = ctx.formParam("csrf");
+		if (!session.verifyCsrf(csrf)) {
+			throw new CsrfException();
+		}
+	}
+	public static void checkCsrfHeader(Context ctx, Session session) {
+		String csrf = ctx.header("anti-csrf-token");
+		if (!session.verifyCsrf(csrf)) {
+			throw new CsrfException();
+		}
+	}
+	
+	public static Session retrieveValidSession(Context ctx, InMemorySessionStore sessionStore) {
+		if (ctx.cookie("id") == null) {
+			throw new InvalidSessionException();
+		}
+		Optional<Session> session = sessionStore.retrieve(ctx.cookie("id"));
+		if (session.isEmpty() || session.get().invalid()) {
+			throw new InvalidSessionException();
+		}
+		return session.get();
+	}
 	
 	public static void main(String[] args) {
 
@@ -267,28 +388,74 @@ public class MyTwittAppServer {
 		String databaseUrl = "jdbc:h2:tcp://localhost:9123/~/db/mytwitt";
 		String dbUser="";
 		String dbPassword="";
-		
-		Jdbi jdbi = startDB(databaseUrl, dbUser, dbPassword);
 
 		int port = Integer.parseInt(System.getProperty("port", "8081"));
+		boolean isHttps = Boolean.parseBoolean(System.getProperty("https", "true"));
+		
+		Jdbi jdbi = startDB(databaseUrl, dbUser, dbPassword);
+		SecureRandomString secureRandomString = new SecureRandomString();
+		InMemorySessionStore sessionStore = new InMemorySessionStore();
+		Cookies cookies = new Cookies(isHttps);
 		
 		Javalin app = Javalin.create(config -> {
 			config.addStaticFiles("/public");
 		});
 		
+		app.get("/", ctx -> {
+			try {
+				Session session = retrieveValidSession(ctx, sessionStore);
+				
+				String csrfToken = secureRandomString.generate();
+				ctx.render("/templates/timeline.html", TemplateUtil.model("csrf_token", csrfToken, "name", session.author.name));
+				
+				session.csrf = csrfToken;
+				sessionStore.add(session);
+				
+			} catch (InvalidSessionException e) {
+				String csrfToken = secureRandomString.generate();
+				ctx.render("/templates/index.html", TemplateUtil.model("csrf_token", csrfToken, "display_path", "questions"));
+				
+				Session session = new Session(secureRandomString.generateSessionId(), null);
+				session.csrf = csrfToken;
+				sessionStore.add(session);
+				
+				cookies.registerSession(ctx, session.id);
+			}
+		});
+		
+		app.get("/autocomplete/:pattern", ctx -> {
+			retrieveValidSession(ctx, sessionStore);
+			ctx.json(autocomplete(jdbi, ctx.pathParam("pattern")));
+			
+		});
+		
 		app.post("/register", ctx -> {
+			checkCsrf(ctx, sessionStore);
+			
 			RegisterRequest request = new RegisterRequest();
 			request.username = ctx.formParam("username");
 			request.password = ctx.formParam("password");
 			request.pseudo = ctx.formParam("pseudo");
-			register(request, jdbi);
+			register(request, secureRandomString, jdbi);
+			
+			ctx.redirect("/");
+		});
+		
+		app.get("/logout", ctx -> {
+			ctx.removeCookie("id");
+			ctx.redirect("/");
 		});
 		app.post("/login", ctx -> {
+			checkCsrf(ctx, sessionStore);
+			
 			String name = ctx.formParam("username");
 			String password = ctx.formParam("password");
 			Optional<Author> login = login(name, password, jdbi);
 			if (login.isPresent()) {
-				ctx.cookie("id", "" + login.get().id);
+				Session session = new Session(secureRandomString.generateSessionId(), login.get());
+				sessionStore.add(session);
+				cookies.registerSession(ctx, session.id);
+				ctx.redirect("/");
 				return;
 			}
 			else {
@@ -297,26 +464,37 @@ public class MyTwittAppServer {
 			}
 		});
 		app.post("/message", ctx -> {
-			String message = ctx.body();
-			int authorId = Integer.parseInt(ctx.cookie("id"));
+			Session session = retrieveValidSession(ctx, sessionStore);
+			checkCsrf(ctx, session);
+			String message = ctx.formParam("message");
+			int authorId = session.author.id;
 			Message m = new Message(authorId, message, Instant.now());
 			save(m, jdbi);
-			ctx.status(HttpStatus.CREATED_201);
+			ctx.redirect("/");
 		});
 		app.get("/timeline", ctx -> {
-			int idFollower = Integer.parseInt(ctx.cookie("id"));;
+			Session session = retrieveValidSession(ctx, sessionStore);
+			int idFollower = session.author.id;
 			List<TimeMessage> timeline = timeline(idFollower, jdbi);
 			ctx.json(new TimeLine(timeline));
 			
 		});
 		app.post("/follow/:id", ctx -> {
-			int idFollower = Integer.parseInt(ctx.cookie("id"));;
+			Session session = retrieveValidSession(ctx, sessionStore);
+			checkCsrfHeader(ctx, session);
+			int idFollower = session.author.id;
 			int idAuthor = ctx.pathParam("id", Integer.class).get();
 			Follow follow = new Follow(idAuthor, idFollower);
 			save(follow, jdbi);
 			ctx.status(HttpStatus.CREATED_201);
 		});
 
+		app.exception(CsrfException.class, (e, ctx) -> {
+			ctx.status(HttpStatus.UNAUTHORIZED_401);
+		});
+		app.exception(InvalidSessionException.class, (e, ctx) -> {
+			ctx.status(HttpStatus.FORBIDDEN_403);
+		});
 		
 		app.start(port);
 	}
@@ -347,6 +525,10 @@ public class MyTwittAppServer {
 		private static final SecureRandom random = new SecureRandom();
 		private static final Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
 
+		public String generateSessionId() {
+			return generate() + generate();
+		}
+		
 		public String generate() {
 			while (true) {
 				String res = generateBytes();
