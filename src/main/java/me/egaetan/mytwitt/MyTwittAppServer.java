@@ -1,12 +1,15 @@
 package me.egaetan.mytwitt;
 
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
+import org.bouncycastle.crypto.generators.BCrypt;
 import org.eclipse.jetty.http.HttpStatus;
 import org.h2.tools.Server;
 import org.jdbi.v3.core.Jdbi;
@@ -44,7 +47,18 @@ public class MyTwittAppServer {
 	public static class Author {
 		public Integer id;
 		public String name;
-		
+	}
+
+	public static class RegisterRequest {
+		public String name;
+		public String password;
+	}
+
+	public static class Login {
+		public Integer id;
+		public String username;
+		public String password;
+		public String salt;
 	}
 
 	public static class TimeMessage {
@@ -91,26 +105,90 @@ public class MyTwittAppServer {
 		);
 	}
 
-	public static Author save(Author author, Jdbi jdbi) {
-		return jdbi.withHandle(handle -> 
-		handle.registerRowMapper(FieldMapper.factory(Author.class))
-		.createUpdate("INSERT INTO Author(name) VALUES"
-				+ " (:name)")
-		.bindFields(author)
-		.executeAndReturnGeneratedKeys("id")
-		.mapTo(Author.class)
-		.one()
-				);
+	
+	
+	public static Author save(RegisterRequest author, Jdbi jdbi) {
+
+		String salt = new SecureRandomString().generate();
+
+		return jdbi.withHandle(h->
+		h.inTransaction(handle -> {
+			int cost = 6;
+			String password = author.password;
+			byte[] generate = BCrypt.generate(BCrypt.passwordToByteArray(password.toCharArray()), 
+					Base64.getDecoder().decode(salt.getBytes()), cost);
+			String pwd = Base64.getEncoder().encodeToString(generate);
+			;
+			
+			int id = handle.registerRowMapper(FieldMapper.factory(Login.class))
+
+					.createUpdate("INSERT INTO Login(username, password, salt) VALUES"
+							+ " (:name, :password, :salt)")
+					.bind("name", author.name)
+					.bind("password", pwd)
+					.bind("salt", salt)
+					.executeAndReturnGeneratedKeys("id")
+					.mapTo(Login.class)
+					.one()
+					.id;
+
+
+			return handle.registerRowMapper(FieldMapper.factory(Author.class))
+
+					.createUpdate("INSERT INTO Author(id, name) VALUES"
+							+ " (:id, :name)")
+					.bind("id", id)
+					.bind("name", author.name)
+					.executeAndReturnGeneratedKeys("id")
+					.mapTo(Author.class)
+					.one();
+
+		}
+				));
 	}
 
-	public static Optional<Author> login(String name, Jdbi jdbi) {
+	public static Optional<Author> login(String name, String password, Jdbi jdbi) {
+		
+		Optional<Login> saltInDb = jdbi.withHandle(handle -> 
+		handle.registerRowMapper(FieldMapper.factory(Login.class))
+		.createQuery("SELECT id, salt FROM Login WHERE username LIKE :name")
+		.bind("name", name)
+		.mapTo(Login.class)
+		.findOne()
+				);
+		if (saltInDb.isEmpty()) {
+			return Optional.empty();
+		}
+		
+		int cost = 6;
+		int id = saltInDb.get().id;
+		String salt = saltInDb.get().salt;
+		byte[] generate = BCrypt.generate(BCrypt.passwordToByteArray(password.toCharArray()), 
+				Base64.getDecoder().decode(salt.getBytes()), cost);
+		String pwd = Base64.getEncoder().encodeToString(generate);
+		
+		
+		Optional<Login> logggedIn = jdbi.withHandle(handle -> 
+		handle.registerRowMapper(FieldMapper.factory(Login.class))
+		.createQuery("SELECT id FROM Login WHERE id = :id AND password LIKE :pwd")
+		.bind("id", id)
+		.bind("pwd", pwd)
+		.mapTo(Login.class)
+		.findOne()
+				);
+		
+		if (logggedIn.isEmpty()) {
+			return Optional.empty();
+		}
+		
 		return jdbi.withHandle(handle -> 
 		handle.registerRowMapper(FieldMapper.factory(Author.class))
-		.createQuery("SELECT id, name FROM Author WHERE name LIKE :name")
-		.bind("name", name)
+		.createQuery("SELECT id, name FROM Author WHERE id LIKE :id")
+		.bind("id", id)
 		.mapTo(Author.class)
 		.findOne()
 				);
+		
 	}
 	
 
@@ -163,12 +241,23 @@ public class MyTwittAppServer {
 					"	idFollower  number " + 
 					"	) " + 
 					"		");
+			
+			conn.createStatement().execute(" " + 
+					"create table Login ( " +
+					"	id  number primary key auto_increment, " + 
+					"	username varchar(140), " + 
+					"	password varchar(140), " + 
+					"	salt varchar(140) " + 
+					"	) " + 
+					"		");
+			
 			conn.commit();
 			conn.close();
 		} catch (SQLException e) {
 			// Silently fail
 		}
 	}
+	
 	
 	public static void main(String[] args) {
 
@@ -187,19 +276,20 @@ public class MyTwittAppServer {
 		});
 		
 		app.post("/register", ctx -> {
-			Author author = ctx.bodyAsClass(Author.class);
-			save(author, jdbi);
+			RegisterRequest register = ctx.bodyAsClass(RegisterRequest.class);
+			save(register, jdbi);
 		});
-		app.get("/login/:name", ctx -> {
-			String name = ctx.pathParam("name");
-			Optional<Author> login = login(name, jdbi);
+		app.post("/login", ctx -> {
+			String name = ctx.formParam("username");
+			String password = ctx.formParam("password");
+			Optional<Author> login = login(name, password, jdbi);
 			if (login.isPresent()) {
 				ctx.cookie("id", "" + login.get().id);
 				return;
 			}
 			else {
-				ctx.status(HttpStatus.NOT_FOUND_404);
-				ctx.result("No user with this name found");
+				ctx.status(HttpStatus.FORBIDDEN_403);
+				ctx.result("Invalid");
 			}
 		});
 		app.post("/message", ctx -> {
@@ -249,6 +339,15 @@ public class MyTwittAppServer {
 
 	}
 
-	
+	public static class SecureRandomString {
+		private static final SecureRandom random = new SecureRandom();
+		private static final Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+
+		public String generate() {
+			byte[] buffer = new byte[16];
+			random.nextBytes(buffer);
+			return encoder.encodeToString(buffer);
+		}
+	}	
 	
 }

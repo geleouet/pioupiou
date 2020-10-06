@@ -9,7 +9,7 @@ create table Message (
 
 
 create table Author (
-	id  number primary key auto_increment,
+	id  number,
 	name  varchar(140)
 	) ;
 	
@@ -19,4 +19,9 @@ create table Follow (
 	idFollower  number
 	) ;
 	
-		
+create table Login (
+	id  number primary key auto_increment, 
+	username varchar(140), 
+	password varchar(140), 
+	salt varchar(140) 
+	);
