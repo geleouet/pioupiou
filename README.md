@@ -3,6 +3,9 @@ An exercice implementation of an asynch messaging app
 
 
 
-## local development
+## development
+Checkout, Run.. application is started on http://localhost:8081
+
+## deploiement
 add System properties :
-- https : false
+- https : true // for secure session cookies
