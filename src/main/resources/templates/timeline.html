@@ -214,9 +214,24 @@
 
     <script>
 
+        var entityMap = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': '&quot;',
+            "'": '&#39;',
+            "/": '&#x2F;'
+        };
+
+        function escapeHtml(string) {
+            return String(string).replace(/[&<>"'\/]/g, function (s) {
+                return entityMap[s];
+            });
+        }
+
         function follow(id) {
             $('#bb' + id).hide(100)
-            $.ajax({ type: "POST", url: "/follow/" + id });            
+            $.ajax({ type: "POST", url: "/follow/" + id });
         }
 
         $('#searchFriend').submit(e => {
@@ -249,8 +264,8 @@
                 let html = "";
                 for (let msg of timeline.messages) {
                     html += "<div class='msgbox'>" +
-                        "<span><b>" + msg.name + " </b> <i> " + msg.time + "</i></span>" +
-                        "<p class='msgtxt'>" + msg.message + "</p>" +
+                        "<span><b>" + escapeHtml(msg.name) + " </b> <i> " + escapeHtml(msg.time) + "</i></span>" +
+                        "<p class='msgtxt'>" + escapeHtml(msg.message) + "</p>" +
                         "</div>";
                 }
                 $('#resultat').html(html);

@@ -390,7 +390,7 @@ public class MyTwittAppServer {
 		String dbPassword="";
 
 		int port = Integer.parseInt(System.getProperty("port", "8081"));
-		boolean isHttps = Boolean.parseBoolean(System.getProperty("https", "true"));
+		boolean isHttps = Boolean.parseBoolean(System.getProperty("https", "false"));
 		
 		Jdbi jdbi = startDB(databaseUrl, dbUser, dbPassword);
 		SecureRandomString secureRandomString = new SecureRandomString();
@@ -426,7 +426,6 @@ public class MyTwittAppServer {
 		app.get("/autocomplete/:pattern", ctx -> {
 			retrieveValidSession(ctx, sessionStore);
 			ctx.json(autocomplete(jdbi, ctx.pathParam("pattern")));
-			
 		});
 		
 		app.post("/register", ctx -> {
@@ -506,6 +505,13 @@ public class MyTwittAppServer {
 			System.out.println("Local db started");
 
 			try {
+				if (System.getProperty("reset", "false").equals("true")) {
+					Connection conn = DriverManager.getConnection(databaseUrl, "", "");
+					conn.createStatement().execute("DROP ALL OBJECTS DELETE FILES");
+					conn.commit();
+					conn.close();
+				}
+				
 				init(databaseUrl);
 				System.out.println("InitDB");
 			} catch (Exception e) {
@@ -516,9 +522,6 @@ public class MyTwittAppServer {
 		} catch (SQLException e1) {
 			throw new RuntimeException(e1);
 		}
-
-		
-
 	}
 
 	public static class SecureRandomString {
@@ -536,10 +539,12 @@ public class MyTwittAppServer {
 					Base64.getDecoder().decode(res.getBytes());
 					return res;
 				} catch (IllegalArgumentException e) {
+					// Silently fail
 				}
 			}
 
 		}
+		
 		public String generateBytes() {
 			byte[] buffer = new byte[16];
 			random.nextBytes(buffer);
